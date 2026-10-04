@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Calculus Solver</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<style>
+:root{--bg:#f3f6f4;--grid:#d9e3df;--ink:#16302b;--mute:#58716b;--card:#fbfdfc;--line:#b9cbc5;--acc:#0b7a66;--acc2:#c2410c;--err:#b42318}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1a18;--grid:#1a2a27;--ink:#e3efeb;--mute:#8fa8a1;--card:#142320;--line:#2c4540;--acc:#3ecfae;--acc2:#fb923c;--err:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg) linear-gradient(var(--grid) 1px,transparent 1px) 0 0/28px 28px;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);color:var(--ink);font:18px/1.55 Georgia,"Times New Roman",serif;min-height:100vh}
+main{max-width:860px;margin:0 auto;padding:28px 16px 56px}
+h1{font-size:clamp(34px,7vw,56px);line-height:1.05;margin:0 0 6px}
+.sub{color:var(--mute);margin:0 0 22px;max-width:60ch}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+textarea{width:100%;font:500 17px/1.4 ui-monospace,Consolas,monospace;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);resize:vertical}
+:focus-visible{outline:3px solid var(--acc2);outline-offset:2px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chips button{font:inherit;font-size:14px;padding:3px 10px;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:99px;cursor:pointer}
+.go{margin-top:16px;font:600 18px Georgia,serif;padding:10px 26px;border:0;border-radius:6px;background:var(--acc2);color:#fff;cursor:pointer}
+.go:disabled{opacity:.6;cursor:wait}
+.kind{font-weight:600;color:var(--acc);margin:18px 0 8px}
+ol{margin:0 0 16px;padding-left:1.4em}li{margin-bottom:12px}
+.m{overflow-x:auto;padding:2px 0}
+.ans{border-left:4px solid var(--acc);padding:6px 0 6px 14px;margin:8px 0}
+.ans small{display:block;color:var(--mute);font-size:15px}
+.err{color:var(--err);margin-top:16px}
+canvas{width:100%;height:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;display:block;margin-top:8px}
+.legend{font-size:15px;display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}.legend i{display:inline-block;width:18px;height:4px;margin-right:6px;border-radius:2px;vertical-align:middle}
+footer{margin-top:26px;font-size:14px;color:var(--mute)}
+</style></head><body><main>
+<h1>Calculus Solver</h1>
+<p class="sub">Type any calculus question in plain words. It works out the type and shows every step.</p>
+<div class="panel">
+ <label for="q" style="color:var(--mute);font-size:15px">Your question</label>
+ <textarea id="q" rows="3" placeholder="e.g. derivative of x^3*sin(x)" spellcheck="false"></textarea>
+ <div class="chips" id="chips"></div>
+ <button class="go" id="go">Solve step by step</button>
+ <div id="out" aria-live="polite"></div>
+</div>
+<footer>Handles derivatives (any order), integrals (indefinite, definite, improper), limits, Taylor and Maclaurin series, and differential equations. Write powers as x^2, multiplication as 3*x, and use sin(x), e^x, ln(x), sqrt(x), pi.</footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script>
+const $=id=>document.getElementById(id),esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const EX=['derivative of x^3*sin(x)','differentiate (x^2+1)/(x-1)','integrate x*e^x','integral of x^2 from 0 to 3','limit of sin(x)/x as x approaches 0','Maclaurin series of e^x up to 4','solve dy/dx = 2y with y(0)=1'];
+$('chips').innerHTML=EX.map(e=>`<button type="button">${esc(e)}</button>`).join('');
+$('chips').querySelectorAll('button').forEach(b=>b.onclick=()=>{$('q').value=b.textContent;solve()});
+const tex=(el,s)=>{try{katex.render(s,el,{displayMode:true,throwOnError:false})}catch(e){el.textContent=s}};
+async function solve(){
+ const q=$('q').value.trim(),out=$('out');if(!q)return;
+ $('go').disabled=true;out.innerHTML='<p style="color:var(--mute)">Solving…</p>';
+ try{
+  const r=await fetch('/api/solve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q})});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.error||'Something went wrong.');
+  render(d);
+ }catch(e){out.innerHTML=`<p class="err">${esc(e.message)}</p>`}
+ $('go').disabled=false;
+}
+function render(d){
+ const out=$('out');
+ out.innerHTML=`<p class="kind">${esc(d.type)}</p><ol id="st"></ol><div class="ans"><small>Answer</small><div class="m" id="ans"></div></div>`+(d.plot.length?'<canvas id="cv" width="780" height="420" role="img" aria-label="Graph"></canvas><div class="legend" id="lg"></div>':'');
+ d.steps.forEach(s=>{const li=document.createElement('li');li.style.marginLeft=(s.depth*18)+'px';li.innerHTML=`<b>${esc(s.title)}</b>`;
+  if(s.math){const m=document.createElement('div');m.className='m';li.appendChild(m);tex(m,s.math)}$('st').appendChild(li)});
+ tex($('ans'),d.answer);
+ if(d.plot.length)draw(d);
+}
+function draw(d){
+ const cv=$('cv'),c=cv.getContext('2d'),W=cv.width,H=cv.height,css=getComputedStyle(document.documentElement),col=n=>css.getPropertyValue(n).trim(),cols=[col('--acc2'),col('--acc')];
+ const ys=d.plot.flatMap(s=>s.y).filter(v=>v!==null).sort((a,b)=>a-b);if(!ys.length)return;
+ const xs=d.plot[0].x,xmin=xs[0],xmax=xs[xs.length-1];
+ let ymin=ys[Math.floor(ys.length*.02)],ymax=ys[Math.floor(ys.length*.98)];if(ymin===ymax){ymin--;ymax++}const pd=(ymax-ymin)*.1;ymin-=pd;ymax+=pd;
+ const X=x=>(x-xmin)/(xmax-xmin)*W,Y=y=>H-(y-ymin)/(ymax-ymin)*H,f=n=>String(+n.toPrecision(4));
+ c.strokeStyle=col('--line');c.fillStyle=col('--mute');c.font='13px monospace';
+ if(xmin<0&&xmax>0){c.beginPath();c.moveTo(X(0),0);c.lineTo(X(0),H);c.stroke()}
+ if(ymin<0&&ymax>0){c.beginPath();c.moveTo(0,Y(0));c.lineTo(W,Y(0));c.stroke()}
+ c.fillText(f(xmin),4,H-6);c.fillText(f(xmax),W-48,H-6);c.fillText(f(ymax),4,14);c.fillText(f(ymin),4,H-20);
+ if(d.shade){const[a,b]=d.shade,y0=Y(Math.max(ymin,Math.min(0,ymax)));c.fillStyle=cols[0]+'33';c.beginPath();c.moveTo(X(a),y0);
+  d.plot[0].x.forEach((x,i)=>{const y=d.plot[0].y[i];if(x>=a&&x<=b&&y!==null)c.lineTo(X(x),Y(y))});c.lineTo(X(b),y0);c.fill()}
+ d.plot.forEach((s,k)=>{c.strokeStyle=cols[k%2];c.lineWidth=2.5;c.beginPath();let pen=false;
+  s.x.forEach((x,i)=>{const y=s.y[i];if(y===null||Math.abs(Y(y))>H*3){pen=false;return}pen?c.lineTo(X(x),Y(y)):(c.moveTo(X(x),Y(y)),pen=true)});c.stroke()});
+ $('lg').innerHTML=d.plot.map((s,k)=>`<span><i style="background:${cols[k%2]}"></i><span class="m2" data-k="${k}"></span></span>`).join('');
+ document.querySelectorAll('.m2').forEach(el=>{try{katex.render(d.plot[+el.dataset.k].label,el)}catch(e){}});
+}
+$('go').onclick=solve;$('q').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();solve()}};
+</script></body></html>
