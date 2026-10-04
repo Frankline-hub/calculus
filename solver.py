@@ -1,17 +1,16 @@
-
 """Rule-based calculus engine: SymPy computes, this module explains the steps. No AI involved."""
 import re
 import sympy as sp
 from sympy.parsing.sympy_parser import (parse_expr, standard_transformations,
     implicit_multiplication_application, convert_xor)
- 
+
 x, y, z, t = sp.symbols('x y z t')
 L = sp.latex
 TR = standard_transformations + (implicit_multiplication_application, convert_xor)
 LOC = {'x': x, 'y': y, 'z': z, 't': t, 'e': sp.E, 'pi': sp.pi, 'ln': sp.log, 'inf': sp.oo, 'oo': sp.oo}
 ALLOWED = set(LOC) | {'sin','cos','tan','cot','sec','csc','asin','acos','atan','sinh','cosh','tanh',
     'exp','log','sqrt','abs','Abs','YP','YPP'}
- 
+
 def parse(s, extra=None):
     s = s.replace('×', '*').replace('÷', '/').replace('π', 'pi').replace('√', 'sqrt').replace('−', '-').strip()
     if '=' in s:
@@ -23,32 +22,33 @@ def parse(s, extra=None):
     if re.search(r'[^A-Za-z0-9+\-*/^().,\s]', s) or re.search(r'(?<!\d)\.(?!\d)', s):
         raise ValueError('Unsupported characters in: ' + s)
     for w in re.findall(r'[A-Za-z]+', s):
-        if w not in ALLOWED: raise ValueError(f'Unknown name "{w}". Use x, sin(x), e^x, ln(x), sqrt(x), pi.')
+        if w not in ALLOWED: raise ValueError(f'I did not understand the word "{w}". Keep to the maths, e.g. x^2*sin(x), e^x, ln(x), sqrt(x), pi.')
     loc = dict(LOC); loc.update(extra or {})
     try: return parse_expr(s, local_dict=loc, transformations=TR)
     except Exception: raise ValueError('Could not read the expression: ' + s)
- 
+
 def clean(e):
     e = re.sub(r'\bwith respect to\s+\w+|\bwrt\s+\w+', '', e, flags=re.I)
+    e = re.split(r'\b(?:using|use|by|via|with|step[- ]by[- ]step|steps|showing|show|please)\b', e, 1, flags=re.I)[0]
     e = re.sub(r'\s*\bd[xyzt]\b\s*[?.]*$', '', e.strip(), flags=re.I)
     return re.sub(r'[?.]+$', '', e).strip()
- 
+
 def pick_var(text, expr):
     m = re.search(r'(?:with respect to|wrt|d/d|∂/∂)\s*([xyzt])', text, re.I)
     if m: return sp.Symbol(m.group(1).lower())
     fs = expr.free_symbols
     return x if x in fs or not fs else sorted(fs, key=str)[0]
- 
+
 class Steps:
     def __init__(s): s.list = []
     def add(s, title, math=None, depth=0): s.list.append({'title': title, 'math': math, 'depth': depth})
- 
+
 # ---------- derivatives ----------
 FT = {sp.sin: lambda u: sp.cos(u), sp.cos: lambda u: -sp.sin(u), sp.tan: lambda u: 1/sp.cos(u)**2,
       sp.exp: lambda u: sp.exp(u), sp.log: lambda u: 1/u, sp.asin: lambda u: 1/sp.sqrt(1-u**2),
       sp.acos: lambda u: -1/sp.sqrt(1-u**2), sp.atan: lambda u: 1/(1+u**2),
       sp.sinh: lambda u: sp.cosh(u), sp.cosh: lambda u: sp.sinh(u), sp.tanh: lambda u: 1/sp.cosh(u)**2}
- 
+
 def dsteps(e, v, st, d=0):
     D = lambda s_: f"\\frac{{d}}{{d{L(v)}}}\\left[{s_}\\right]"
     if not e.has(v): st.add('Constant rule', f"{D(L(e))}=0", d); return sp.Integer(0)
@@ -85,7 +85,7 @@ def dsteps(e, v, st, d=0):
                f"{D(L(e))}={L(outer)}" + (f"\\cdot u',\\ u={L(u)}" if u != v else ''), d)
         return outer*(dsteps(u, v, st, d+1) if u != v else 1)
     r = sp.diff(e, v); st.add('Differentiate', f"{D(L(e))}={L(r)}", d); return r
- 
+
 def derivative(expr, v, order=1):
     st = Steps(); cur = expr
     for k in range(order):
@@ -95,13 +95,13 @@ def derivative(expr, v, order=1):
         st.add('Simplify', f"{L(cur)}")
     return {'type': 'Derivative' if order == 1 else f'Derivative of order {order}',
             'steps': st.list, 'answer': L(cur), 'plot': [expr, cur], 'var': v}
- 
+
 # ---------- integrals ----------
 NAMES = {'ConstantRule': 'Integral of a constant', 'ConstantTimesRule': 'Pull the constant out',
     'PowerRule': 'Power rule', 'AddRule': 'Split the sum and integrate each term', 'URule': 'Substitution',
     'PartsRule': 'Integration by parts', 'ExpRule': 'Exponential rule', 'ReciprocalRule': 'Integral of 1/x',
     'TrigRule': 'Standard trig integral', 'RewriteRule': 'Rewrite the integrand', 'DontKnowRule': 'No elementary rule found'}
- 
+
 def rule_steps(r, st, d=0):
     if r is None: return
     n = type(r).__name__; v = getattr(r, 'variable', None); ig = getattr(r, 'integrand', None)
@@ -113,7 +113,7 @@ def rule_steps(r, st, d=0):
         val = getattr(r, k)
         for item in (val if isinstance(val, (list, tuple)) else [val]):
             if hasattr(item, 'integrand') and hasattr(item, 'variable'): rule_steps(item, st, d+1)
- 
+
 def antiderivative(expr, v, st):
     try:
         from sympy.integrals.manualintegrate import integral_steps
@@ -122,14 +122,14 @@ def antiderivative(expr, v, st):
         st.add('Integrate with the symbolic engine', f"\\int {L(expr)}\\,d{L(v)}")
     F = sp.integrate(expr, v)
     return F
- 
+
 def integral(expr, v):
     st = Steps(); F = antiderivative(expr, v, st)
     if F.has(sp.Integral): raise ValueError('No closed-form antiderivative exists for this integrand (or it is beyond this engine).')
     ok = sp.simplify(sp.diff(F, v) - expr) == 0
     st.add('Check: differentiating the result gives the integrand back' if ok else 'Result', f"{L(F)}+C")
     return {'type': 'Indefinite integral', 'steps': st.list, 'answer': L(F) + '+C', 'plot': [expr, F], 'var': v}
- 
+
 def definite(expr, v, a, b):
     st = Steps(); F = antiderivative(expr, v, st)
     val = sp.integrate(expr, (v, a, b))
@@ -140,7 +140,7 @@ def definite(expr, v, a, b):
     if val.has(sp.Integral): val = sp.Integral(expr, (v, a, b)).evalf()
     ans = L(sp.simplify(val)) + (f"\\approx {sp.N(val, 8)}" if not val.is_Integer else '')
     return {'type': 'Definite integral', 'steps': st.list, 'answer': ans, 'plot': [expr], 'var': v, 'shade': [a, b]}
- 
+
 # ---------- limits ----------
 def limit(expr, v, p):
     st = Steps(); st.add('Goal', f"\\lim_{{{L(v)}\\to {L(p)}}} {L(expr)}")
@@ -167,7 +167,7 @@ def limit(expr, v, p):
             return {'type': 'Limit', 'steps': st.list, 'answer': '\\text{does not exist}', 'plot': [expr], 'var': v, 'center': p}
     st.add('Result', L(ans))
     return {'type': 'Limit', 'steps': st.list, 'answer': L(ans), 'plot': [expr], 'var': v, 'center': p}
- 
+
 # ---------- series ----------
 def series(expr, v, a, n):
     st = Steps(); st.add('Taylor formula', f"f(x)\\approx\\sum_{{k=0}}^{{{n}}}\\frac{{f^{{(k)}}({L(a)})}}{{k!}}(x-{L(a)})^k")
@@ -179,7 +179,7 @@ def series(expr, v, a, n):
     poly = sp.series(expr, v, a, n+1).removeO()
     st.add('Assemble the polynomial', L(poly))
     return {'type': f'Taylor series (degree {n})', 'steps': st.list, 'answer': L(poly), 'plot': [expr, poly], 'var': v}
- 
+
 # ---------- differential equations ----------
 def ode(q):
     yf = sp.Function('y')
@@ -210,7 +210,7 @@ def ode(q):
     rhs = sol.rhs if not isinstance(sol, (list, tuple)) else sol[0].rhs
     rhs = rhs.subs({s: 1 for s in rhs.free_symbols if str(s).startswith('C')})
     return {'type': 'Differential equation', 'steps': st.list, 'answer': L(sol if not isinstance(sol, list) else sol[0]), 'plot': [rhs], 'var': x}
- 
+
 # ---------- dispatcher ----------
 def curve(expr, v, lo, hi, n=300):
     f = sp.lambdify(v, expr, 'math'); xs, ys = [], []
@@ -220,7 +220,7 @@ def curve(expr, v, lo, hi, n=300):
         except Exception: yv = None
         xs.append(xv); ys.append(yv if yv is not None and abs(yv) < 1e9 and yv == yv else None)
     return {'x': xs, 'y': ys, 'label': L(expr)}
- 
+
 def solve(q):
     q = q.strip().replace('∫', ' integral ').replace('→', '->')
     if not q: raise ValueError('Type a question first.')
